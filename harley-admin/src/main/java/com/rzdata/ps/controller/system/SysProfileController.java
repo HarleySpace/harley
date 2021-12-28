@@ -1,0 +1,112 @@
+package com.rzdata.ps.controller.system;
+
+import com.rzdata.annotation.Log;
+import com.rzdata.common.constant.UserConstants;
+import com.rzdata.core.controller.BaseController;
+import com.rzdata.core.domain.AjaxResult;
+import com.rzdata.system.model.SysUser;
+import com.rzdata.core.domain.model.LoginUser;
+import com.rzdata.common.enums.BusinessType;
+import com.rzdata.utils.SecurityUtils;
+import com.rzdata.utils.StringUtils;
+import com.rzdata.ps.service.TokenService;
+import com.rzdata.system.service.ISysUserService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * 个人信息 业务处理
+ *
+ * @author ruoyi
+ */
+@RestController
+@RequestMapping("/system/user/profile")
+public class SysProfileController extends BaseController
+{
+    @Autowired
+    private ISysUserService userService;
+
+    @Autowired
+    private TokenService tokenService;
+
+    /**
+     * 个人信息
+     */
+    @GetMapping
+    public AjaxResult profile()
+    {
+        LoginUser loginUser = getLoginUser();
+        SysUser user = loginUser.getUser();
+		Map<String,Object> ajax = new HashMap<>();
+		ajax.put("user", user);
+        ajax.put("roleGroup", userService.selectUserRoleGroup(loginUser.getUsername()));
+        ajax.put("postGroup", userService.selectUserPostGroup(loginUser.getUsername()));
+        return AjaxResult.success(ajax);
+    }
+
+    /**
+     * 修改用户
+     */
+    @Log(title = "个人信息", businessType = BusinessType.UPDATE)
+    @PutMapping
+    public AjaxResult updateProfile(@RequestBody SysUser user)
+    {
+        if (StringUtils.isNotEmpty(user.getPhonenumber())
+                && UserConstants.NOT_UNIQUE.equals(userService.checkPhoneUnique(user)))
+        {
+            return AjaxResult.error("修改用户'" + user.getUserName() + "'失败，手机号码已存在");
+        }
+        if (StringUtils.isNotEmpty(user.getEmail())
+                && UserConstants.NOT_UNIQUE.equals(userService.checkEmailUnique(user)))
+        {
+            return AjaxResult.error("修改用户'" + user.getUserName() + "'失败，邮箱账号已存在");
+        }
+        LoginUser loginUser = getLoginUser();
+        SysUser sysUser = loginUser.getUser();
+        user.setUserId(sysUser.getUserId());
+        user.setPassword(null);
+        if (userService.updateUserProfile(user) > 0)
+        {
+            // 更新缓存用户信息
+            sysUser.setNickName(user.getNickName());
+            sysUser.setPhonenumber(user.getPhonenumber());
+            sysUser.setEmail(user.getEmail());
+            sysUser.setSex(user.getSex());
+            tokenService.setLoginUser(loginUser);
+            return AjaxResult.success();
+        }
+        return AjaxResult.error("修改个人信息异常，请联系管理员");
+    }
+
+    /**
+     * 重置密码
+     */
+    @Log(title = "个人信息", businessType = BusinessType.UPDATE)
+    @PutMapping("/updatePwd")
+    public AjaxResult updatePwd(String oldPassword, String newPassword)
+    {
+        LoginUser loginUser = getLoginUser();
+        String userName = loginUser.getUsername();
+        String password = loginUser.getPassword();
+        if (!SecurityUtils.matchesPassword(oldPassword, password))
+        {
+            return AjaxResult.error("修改密码失败，旧密码错误");
+        }
+        if (SecurityUtils.matchesPassword(newPassword, password))
+        {
+            return AjaxResult.error("新密码不能与旧密码相同");
+        }
+        if (userService.resetUserPwd(userName, SecurityUtils.encryptPassword(newPassword)) > 0)
+        {
+            // 更新缓存用户密码
+            loginUser.getUser().setPassword(SecurityUtils.encryptPassword(newPassword));
+            tokenService.setLoginUser(loginUser);
+            return AjaxResult.success();
+        }
+        return AjaxResult.error("修改密码异常，请联系管理员");
+    }
+
+}
